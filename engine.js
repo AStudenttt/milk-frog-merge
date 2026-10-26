@@ -99,8 +99,12 @@
    // Update stored geometry once, and derive velocity from the constrained
    // displacement. Internal damping leaves centre-of-mass motion intact.
    for(const f of this.frogs){let vx=0,vy=0;for(const n of f.nodes){vx+=(n.position.x-n.x0)/ratio;vy+=(n.position.y-n.y0)/ratio;}vx/=f.nodes.length;vy/=f.nodes.length;
+    // Separating a fresh merge overlap within one substep would otherwise turn
+    // into a launch speed (~45px/frame) and throw small frogs out of the pile.
+    // Cap the rise speed of the whole body; 5px/frame still allows a ~40px hop.
+    const rise=Math.max(vy,-5);
     for(const n of f.nodes){const x=n.position.x,y=n.position.y;n.position.x=n.x0;n.position.y=n.y0;Body.setPosition(n,{x,y});if(!this.weight(n))continue;
-     Body.setVelocity(n,{x:vx+((x-n.x0)/ratio-vx)*.965,y:vy+((y-n.y0)/ratio-vy)*.965});}
+     Body.setVelocity(n,{x:vx+((x-n.x0)/ratio-vx)*.965,y:rise+((y-n.y0)/ratio-vy)*.965});}
     this.measure(f);if(f.isSleeping)continue;let travel=0;for(const n of f.nodes)travel=Math.max(travel,Math.hypot(n.position.x-n.x0,n.position.y-n.y0));f.travel=travel;
     if(f.contact&&travel<.055*ratio)f.quiet+=ms;else f.quiet=0;
     if(f.quiet>850){f.isSleeping=true;for(const n of f.nodes)Sleeping.set(n,true);}
@@ -113,7 +117,10 @@
     if(f.bounds.min.y>this.warning+3||p.age>=500)p.entered=true;
     // Contact with the visible line, including either boundary touching it.
     // A piece wholly above or below the line does not keep the timer alive.
-    if(f.bounds.min.y<=this.warning&&f.bounds.max.y>=this.warning&&
+    // Only a frog resting on the pile counts: one bouncing or thrown through
+    // the air is not an overflow. Sleeping frogs skip contact detection.
+    const resting=f.isSleeping||(f.contact&&Math.hypot(f.velocity.x,f.velocity.y)<1.2);
+    if(resting&&f.bounds.min.y<=this.warning&&f.bounds.max.y>=this.warning&&
        f.bounds.max.x>=15&&f.bounds.min.x<=this.width-15)touching=true;
    }
    // Count only uninterrupted contact; clear on the first contact-free tick.
