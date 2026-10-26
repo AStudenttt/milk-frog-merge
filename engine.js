@@ -35,7 +35,7 @@
   mergePending(){const pending=this.pending;this.pending=[];for(const [a,b] of pending){if(!this.frogs.includes(a)||!this.frogs.includes(b))continue;const level=a.frog.level+1,s=this.shapes[level-1];this.measure(a);this.measure(b);let x=(a.position.x+b.position.x)/2,y=(a.position.y+b.position.y)/2;x=Math.max(10+s.width/2,Math.min(this.width-10-s.width/2,x));y=Math.min(this.height-12-s.height/2,y);const entered=a.frog.entered||b.frog.entered||a.frog.age>=500||b.frog.age>=500,vx=Math.max(-1.5,Math.min(1.5,(a.velocity.x+b.velocity.x)/2));this.remove(a);this.remove(b);const f=this.make(level,x,y,{entered,pop:1});for(const n of f.nodes)Body.setVelocity(n,{x:vx,y:Math.min(0,(a.velocity.y+b.velocity.y)/2)});const points=2**(level-1);this.score+=points;const firstWin=level===11&&!this.won;if(firstWin)this.won=true;this.onMerge({level,points,x,y,score:this.score,firstWin});}}
   weight(n){return n.isStatic||n.owner.isSleeping?0:n.inverseMass;}
   solveLengths(f,dt){
-   for(const e of f.links){const a=f.nodes[e.a],b=f.nodes[e.b],wa=this.weight(a),wb=this.weight(b),dx=b.position.x-a.position.x,dy=b.position.y-a.position.y,l=Math.hypot(dx,dy);if(l<1e-8||wa+wb===0)continue;
+   for(const e of f.links){const a=f.nodes[e.a],b=f.nodes[e.b],wa=this.weight(a),wb=this.weight(b),dx=b.position.x-a.position.x,dy=b.position.y-a.position.y,l=Math.sqrt(dx*dx+dy*dy);if(l<1e-8||wa+wb===0)continue;
     // Stretch compliance scales with rest length and inverse mass. Small
     // bodies have firmer material to survive their larger relative drop.
     const size=e.length/12,softness=e.stiffness<.1?2.5:1;
@@ -64,9 +64,18 @@
    }
   }
   contacts(nodes){
-   let radius=4;for(const n of nodes)radius=Math.max(radius,n.circleRadius);const cell=radius*2.05,grid=new Map();
-   for(let i=0;i<nodes.length;i++){const n=nodes[i],x=Math.floor(n.position.x/cell),y=Math.floor(n.position.y/cell);n.hashX=x;n.hashY=y;n.order=i;const key=x+y*2048;if(!grid.has(key))grid.set(key,[]);grid.get(key).push(n);}
-   for(const a of nodes){if(a.owner.isSleeping)continue;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const bucket=grid.get(a.hashX+dx+(a.hashY+dy)*2048);if(!bucket)continue;for(const b of bucket){if((!b.owner.isSleeping&&b.order<=a.order)||a.owner===b.owner)continue;
+   // Frog-level broadphase. A grid sized by the largest particle made every
+   // small particle share crowded cells once a big frog existed. Test only
+   // frog pairs whose live boxes overlap, and only particles inside the other
+   // frog's box; the set of resolved particle pairs is unchanged.
+   const frogs=this.frogs,la=this.nearA||(this.nearA=[]),lb=this.nearB||(this.nearB=[]);
+   for(const f of frogs){let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const n of f.nodes){const p=n.position,r=n.circleRadius+.5;if(p.x-r<x0)x0=p.x-r;if(p.y-r<y0)y0=p.y-r;if(p.x+r>x1)x1=p.x+r;if(p.y+r>y1)y1=p.y+r;}const box=f.box||(f.box={});box.x0=x0;box.y0=y0;box.x1=x1;box.y1=y1;}
+   for(let i=0;i<frogs.length;i++){const fa=frogs[i],A=fa.box;for(let j=i+1;j<frogs.length;j++){const fb=frogs[j],B=fb.box;
+    if((fa.isSleeping&&fb.isSleeping)||A.x0>B.x1||B.x0>A.x1||A.y0>B.y1||B.y0>A.y1)continue;
+    la.length=0;lb.length=0;
+    for(const n of fa.nodes){const p=n.position,r=n.circleRadius;if(p.x+r>=B.x0&&p.x-r<=B.x1&&p.y+r>=B.y0&&p.y-r<=B.y1)la.push(n);}if(!la.length)continue;
+    for(const n of fb.nodes){const p=n.position,r=n.circleRadius;if(p.x+r>=A.x0&&p.x-r<=A.x1&&p.y+r>=A.y0&&p.y-r<=A.y1)lb.push(n);}
+    for(const a of la)for(const b of lb){
       let px=b.position.x-a.position.x,py=b.position.y-a.position.y,r=a.circleRadius+b.circleRadius,d2=px*px+py*py;if(d2>=r*r)continue;
       const fa=a.owner,fb=b.owner;fa.contact=fb.contact=true;
       if(fa.isSleeping&&Math.hypot(b.velocity.x,b.velocity.y)>.16)this.wake(fa);
